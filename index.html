@@ -10,7 +10,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="KN Words" />
-  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="favicon.png" />
 
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+Kannada:wght@500;700&display=swap" rel="stylesheet" />
@@ -130,6 +131,11 @@
       <div id="glimpse-panel">
         <div class="text-center py-6">
           <div id="word-glimpse" class="kn text-8xl font-bold leading-none"></div>
+        </div>
+        <!-- Glimpse countdown bar -->
+        <div class="w-full bg-slate-100 rounded-full h-1 mt-4 mb-1 overflow-hidden">
+          <div id="glimpse-bar"
+            class="h-1 rounded-full bg-slate-400 transition-none" style="width:100%"></div>
         </div>
         <p class="text-center text-sm text-slate-400 mt-2">
           Snapshot the word shape. Don't spell it out.
@@ -529,16 +535,41 @@ function runCard() {
   qs('#word-glimpse').textContent = w.kn;
   updateProgress();
 
-  // countdown
+  // Glimpse bar: smooth RAF drain from 100% → 0% over glimpseSec
+  const bar = qs('#glimpse-bar');
+  bar.style.transition = 'none';
+  bar.style.width = '100%';
+
+  const durationMs = session.glimpseSec * 1000;
+  const startMs = performance.now();
+  let rafId;
+
+  function tick(now) {
+    const elapsed = now - startMs;
+    const pct = Math.max(0, 1 - elapsed / durationMs);
+    bar.style.width = (pct * 100).toFixed(1) + '%';
+    // Colour shift: slate → amber in final 25%
+    if (pct < 0.25) {
+      bar.style.backgroundColor = '#f59e0b'; // amber-400
+    } else {
+      bar.style.backgroundColor = '#94a3b8'; // slate-400
+    }
+    if (pct > 0) rafId = requestAnimationFrame(tick);
+  }
+  rafId = requestAnimationFrame(tick);
+  session.timerTick = { cancel: () => cancelAnimationFrame(rafId) };
+
+  // Digit countdown in timer-display
   let remaining = session.glimpseSec;
   qs('#timer-display').textContent = remaining + 's';
-  session.timerTick = setInterval(() => {
+  const tickInterval = setInterval(() => {
     remaining--;
     qs('#timer-display').textContent = remaining > 0 ? remaining + 's' : '';
-    if (remaining <= 0) { clearInterval(session.timerTick); session.timerTick = null; }
+    if (remaining <= 0) clearInterval(tickInterval);
   }, 1000);
+  session._countdownInterval = tickInterval;
 
-  session.timer = setTimeout(() => reveal(), session.glimpseSec * 1000);
+  session.timer = setTimeout(() => reveal(), durationMs);
 }
 
 function reveal() {
@@ -671,8 +702,9 @@ function finishSession() {
 }
 
 function clearSession() {
-  if (session.timer)     { clearTimeout(session.timer);    session.timer    = null; }
-  if (session.timerTick) { clearInterval(session.timerTick); session.timerTick = null; }
+  if (session.timer)              { clearTimeout(session.timer);  session.timer = null; }
+  if (session.timerTick?.cancel)  { session.timerTick.cancel();   session.timerTick = null; }
+  if (session._countdownInterval) { clearInterval(session._countdownInterval); session._countdownInterval = null; }
 }
 
 /* ══════════════════════════════════════════
